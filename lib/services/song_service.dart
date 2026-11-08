@@ -82,6 +82,24 @@ class SongService {
     return interleaveSongs(available);
   }
 
+  /// Semua lagu dari satu artis: lagu sendiri, iTunes, dan Jamendo.
+  /// Hasil pencarian disaring supaya nama artisnya benar-benar cocok.
+  Future<List<Song>> byArtist(String artist) async {
+    final key = artist.trim().toLowerCase();
+    if (key.isEmpty) return <Song>[];
+
+    bool match(Song s) => s.artist.toLowerCase().contains(key);
+
+    final own = await _safe(ownSongs()) ?? <Song>[];
+    final found = await _safe(search(artist)) ?? <Song>[];
+
+    final seen = <String>{};
+    return [
+      ...own.where(match),
+      ...found.where(match),
+    ].where((s) => seen.add(s.id)).toList();
+  }
+
   Future<List<Song>> byGenre(String genre) {
     if (genre == indonesiaTag) return indonesiaHits();
     return _jamendo.songsByGenre(genre);

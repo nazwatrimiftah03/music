@@ -4,6 +4,7 @@ import 'package:provider/provider.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 import 'core/supabase_config.dart';
+import 'providers/data_saver_provider.dart';
 import 'providers/history_provider.dart';
 import 'providers/likes_provider.dart';
 import 'providers/player_provider.dart';
@@ -34,7 +35,7 @@ Future<void> main() async {
 
   await Supabase.initialize(
     url: SupabaseConfig.url,
-    anonKey: SupabaseConfig.anonKey,
+    publishableKey: SupabaseConfig.anonKey,
   );
 
   runApp(const PinkBeatApp());
@@ -48,6 +49,7 @@ class PinkBeatApp extends StatelessWidget {
     return MultiProvider(
       providers: [
         ChangeNotifierProvider(create: (_) => ThemeProvider()),
+        ChangeNotifierProvider(create: (_) => DataSaverProvider()),
         ChangeNotifierProvider(create: (_) => HistoryProvider()),
         ChangeNotifierProvider(create: (_) => LikesProvider()),
         // Setiap lagu mulai diputar -> otomatis masuk riwayat.

@@ -125,7 +125,7 @@ class _AdminSongsScreenState extends State<AdminSongsScreen> {
                       width: 48,
                       height: 48,
                       fit: BoxFit.cover,
-                      errorBuilder: (_, __, ___) => Container(
+                      errorBuilder: (_, _, _) => Container(
                         width: 48,
                         height: 48,
                         color: cs.surfaceContainerHighest,

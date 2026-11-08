@@ -1,3 +1,5 @@
+import 'dart:math';
+
 import '../models/song.dart';
 import 'itunes_service.dart';
 import 'jamendo_service.dart';
@@ -94,5 +96,53 @@ class RecommendationService {
     }
 
     return result;
+  }
+
+  /// "Mix harian": selang-seling lagu yang kamu sukai dan lagu baru hasil
+  /// rekomendasi. Urutannya diacak dengan benih tanggal hari ini, jadi mix
+  /// tetap sama sepanjang hari dan berganti besok.
+  Future<List<Song>> dailyMix({
+    required List<Song> history,
+    int limit = 25,
+  }) async {
+    List<Song> liked = [];
+    try {
+      liked = await _library.likedSongs();
+    } catch (_) {
+      // Tanpa data like, mix tetap dibuat dari rekomendasi.
+    }
+
+    List<Song> fresh = [];
+    try {
+      fresh = await forYou(history: history, limit: limit);
+    } catch (_) {
+      // Rekomendasi gagal: pakai lagu yang disukai saja.
+    }
+
+    final now = DateTime.now();
+    final rng = Random(now.year * 10000 + now.month * 100 + now.day);
+    final favorites = [...liked]..shuffle(rng);
+    final discoveries = [...fresh]..shuffle(rng);
+
+    final seen = <String>{};
+    final mix = <Song>[];
+    var a = 0;
+    var b = 0;
+
+    // Pola: 1 lagu favorit, lalu 1 lagu baru, dan seterusnya.
+    while (mix.length < limit &&
+        (a < favorites.length || b < discoveries.length)) {
+      if (a < favorites.length) {
+        final s = favorites[a++];
+        if (seen.add(s.id)) mix.add(s);
+      }
+      if (mix.length >= limit) break;
+      if (b < discoveries.length) {
+        final s = discoveries[b++];
+        if (seen.add(s.id)) mix.add(s);
+      }
+    }
+
+    return mix;
   }
 }

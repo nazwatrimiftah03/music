@@ -4,6 +4,9 @@ import 'package:provider/provider.dart';
 import '../../providers/likes_provider.dart';
 import '../../providers/player_provider.dart';
 import '../../widgets/cover_image.dart';
+import '../artist/artist_screen.dart';
+import '../../widgets/queue_sheet.dart';
+import '../../widgets/sleep_timer_sheet.dart';
 import '../../widgets/song_menu.dart';
 
 class NowPlayingScreen extends StatefulWidget {
@@ -100,11 +103,17 @@ class _NowPlayingScreenState extends State<NowPlayingScreen> {
                                   .headlineSmall
                                   ?.copyWith(fontWeight: FontWeight.w800)),
                           const SizedBox(height: 4),
-                          Text(song.artist,
-                              maxLines: 1,
-                              overflow: TextOverflow.ellipsis,
-                              style: TextStyle(
-                                  fontSize: 16, color: cs.onSurfaceVariant)),
+                          GestureDetector(
+                            behavior: HitTestBehavior.opaque,
+                            onTap: hasArtistPage(song.artist)
+                                ? () => openArtist(context, song.artist)
+                                : null,
+                            child: Text(song.artist,
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                                style: TextStyle(
+                                    fontSize: 16, color: cs.onSurfaceVariant)),
+                          ),
                         ],
                       ),
                     ),
@@ -205,7 +214,20 @@ class _NowPlayingScreenState extends State<NowPlayingScreen> {
                     ),
                   ],
                 ),
-                const SizedBox(height: 24),
+                const SizedBox(height: 4),
+                Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                  children: [
+                    const SleepTimerButton(),
+                    IconButton(
+                      tooltip: 'Antrean',
+                      icon: Icon(Icons.queue_music_rounded,
+                          color: cs.onSurfaceVariant),
+                      onPressed: () => showQueueSheet(context),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 12),
               ],
             ),
           ),

@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
+import '../../providers/data_saver_provider.dart';
 import '../../providers/history_provider.dart';
 import '../../providers/likes_provider.dart';
 import '../../services/auth_service.dart';
@@ -8,6 +9,7 @@ import '../../services/admin_service.dart';
 import '../../services/library_service.dart';
 import '../admin/admin_songs_screen.dart';
 import '../../theme/theme_provider.dart';
+import '../../widgets/listening_stats.dart';
 
 class ProfileScreen extends StatefulWidget {
   const ProfileScreen({super.key});
@@ -113,6 +115,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
     final cs = Theme.of(context).colorScheme;
     final tt = Theme.of(context).textTheme;
     final theme = context.watch<ThemeProvider>();
+    final dataSaver = context.watch<DataSaverProvider>();
     final likes = context.watch<LikesProvider>();
     final history = context.watch<HistoryProvider>();
 
@@ -198,6 +201,10 @@ class _ProfileScreenState extends State<ProfileScreen> {
                 ),
                 const SizedBox(height: 28),
 
+                // ===== Sering kamu dengar =====
+                ListeningStats(songs: history.songs),
+                const SizedBox(height: 28),
+
                 // ===== Akun =====
                 _SectionTitle('Akun'),
                 const SizedBox(height: 8),
@@ -272,6 +279,19 @@ class _ProfileScreenState extends State<ProfileScreen> {
                   ],
                   selected: {theme.mode},
                   onSelectionChanged: (s) => theme.setMode(s.first),
+                ),
+                const SizedBox(height: 12),
+                Card(
+                  child: SwitchListTile(
+                    secondary: const Icon(Icons.data_saver_on_rounded),
+                    title: const Text('Hemat data'),
+                    subtitle: const Text(
+                      'Gambar sampul tidak dimuat. '
+                          'Lagu tetap diputar seperti biasa.',
+                    ),
+                    value: dataSaver.enabled,
+                    onChanged: dataSaver.setEnabled,
+                  ),
                 ),
                 const SizedBox(height: 28),
 

@@ -8,6 +8,7 @@ import '../../services/recommendation_service.dart';
 import '../../services/song_service.dart';
 import '../../widgets/cover_image.dart';
 import '../../widgets/song_menu.dart';
+import '../library/song_list_screen.dart';
 
 class HomeScreen extends StatefulWidget {
   const HomeScreen({super.key});
@@ -112,6 +113,23 @@ class _HomeScreenState extends State<HomeScreen> {
               child: ListView(
                 padding: const EdgeInsets.only(bottom: 16),
                 children: [
+                  _DailyMixCard(
+                    onTap: () {
+                      final recent = context.read<HistoryProvider>().songs;
+                      Navigator.of(context).push(
+                        MaterialPageRoute(
+                          builder: (_) => SongListScreen(
+                            title: 'Mix harian',
+                            icon: Icons.auto_awesome_rounded,
+                            allowSaveAsPlaylist: true,
+                            loader: () => _recSvc.dailyMix(history: recent),
+                            emptyText: 'Belum ada lagu untuk mix hari ini.\n'
+                                'Sukai beberapa lagu dulu ya 💗',
+                          ),
+                        ),
+                      );
+                    },
+                  ),
                   if (history.isNotEmpty) ...[
                     const _RowTitle('Terakhir diputar'),
                     SizedBox(
@@ -223,7 +241,7 @@ class _SongCards extends StatelessWidget {
       scrollDirection: Axis.horizontal,
       padding: const EdgeInsets.symmetric(horizontal: 20),
       itemCount: songs.length,
-      separatorBuilder: (_, __) => const SizedBox(width: 14),
+      separatorBuilder: (_, _) => const SizedBox(width: 14),
       itemBuilder: (context, i) {
         final song = songs[i];
         return GestureDetector(
@@ -255,6 +273,78 @@ class _SongCards extends StatelessWidget {
           ),
         );
       },
+    );
+  }
+}
+
+
+/// Kartu besar di Beranda yang membuka "Mix harian".
+class _DailyMixCard extends StatelessWidget {
+  final VoidCallback onTap;
+  const _DailyMixCard({required this.onTap});
+
+  @override
+  Widget build(BuildContext context) {
+    final cs = Theme.of(context).colorScheme;
+
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(20, 8, 20, 4),
+      child: Material(
+        color: Colors.transparent,
+        child: InkWell(
+          borderRadius: BorderRadius.circular(20),
+          onTap: onTap,
+          child: Ink(
+            padding: const EdgeInsets.all(18),
+            decoration: BoxDecoration(
+              borderRadius: BorderRadius.circular(20),
+              gradient: LinearGradient(
+                begin: Alignment.topLeft,
+                end: Alignment.bottomRight,
+                colors: [cs.primary, cs.secondary],
+              ),
+              boxShadow: [
+                BoxShadow(
+                  color: cs.primary.withValues(alpha: 0.3),
+                  blurRadius: 20,
+                  offset: const Offset(0, 8),
+                ),
+              ],
+            ),
+            child: Row(
+              children: [
+                const Icon(Icons.auto_awesome_rounded,
+                    size: 36, color: Colors.white),
+                const SizedBox(width: 16),
+                const Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        'Mix harian',
+                        style: TextStyle(
+                          color: Colors.white,
+                          fontSize: 20,
+                          fontWeight: FontWeight.w800,
+                        ),
+                      ),
+                      SizedBox(height: 2),
+                      Text(
+                        'Campuran lagu favorit dan temuan baru, '
+                            'berganti tiap hari',
+                        style: TextStyle(color: Colors.white70, fontSize: 12),
+                      ),
+                    ],
+                  ),
+                ),
+                const SizedBox(width: 8),
+                const Icon(Icons.chevron_right_rounded,
+                    color: Colors.white, size: 28),
+              ],
+            ),
+          ),
+        ),
+      ),
     );
   }
 }

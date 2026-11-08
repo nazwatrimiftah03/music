@@ -3,6 +3,8 @@ import 'package:provider/provider.dart';
 import '../models/playlist.dart';
 import '../models/song.dart';
 import '../providers/likes_provider.dart';
+import '../providers/player_provider.dart';
+import '../screens/artist/artist_screen.dart';
 import '../services/library_service.dart';
 import 'cover_image.dart';
 
@@ -136,6 +138,7 @@ void showSongMenu(
       VoidCallback? onChanged,
     }) {
   final likes = context.read<LikesProvider>();
+  final player = context.read<PlayerProvider>();
   final liked = likes.isLiked(song.id);
   final messenger = ScaffoldMessenger.of(context);
 
@@ -167,6 +170,32 @@ void showSongMenu(
             },
           ),
           ListTile(
+            leading: const Icon(Icons.playlist_play_rounded),
+            title: const Text('Putar berikutnya'),
+            onTap: () async {
+              Navigator.pop(ctx);
+              final queued = await player.playNext(song);
+              messenger.showSnackBar(SnackBar(
+                content: Text(queued
+                    ? 'Akan diputar setelah lagu ini'
+                    : 'Memutar "${song.title}"'),
+              ));
+            },
+          ),
+          ListTile(
+            leading: const Icon(Icons.queue_music_rounded),
+            title: const Text('Tambah ke antrean'),
+            onTap: () async {
+              Navigator.pop(ctx);
+              final queued = await player.addToQueue(song);
+              messenger.showSnackBar(SnackBar(
+                content: Text(queued
+                    ? 'Ditambahkan ke antrean'
+                    : 'Memutar "${song.title}"'),
+              ));
+            },
+          ),
+          ListTile(
             leading: const Icon(Icons.playlist_add_rounded),
             title: const Text('Tambah ke playlist'),
             onTap: () {
@@ -174,6 +203,16 @@ void showSongMenu(
               showAddToPlaylist(context, song);
             },
           ),
+          if (hasArtistPage(song.artist))
+            ListTile(
+              leading: const Icon(Icons.person_outline_rounded),
+              title: Text('Lihat artis: ${song.artist}',
+                  maxLines: 1, overflow: TextOverflow.ellipsis),
+              onTap: () {
+                Navigator.pop(ctx);
+                openArtist(context, song.artist);
+              },
+            ),
           if (playlistId != null)
             ListTile(
               leading: const Icon(Icons.remove_circle_outline_rounded),

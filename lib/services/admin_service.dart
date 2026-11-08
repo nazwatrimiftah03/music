@@ -89,7 +89,7 @@ class AdminService {
       await _db.from('songs').insert(row);
     } catch (_) {
       // Data gagal disimpan -> hapus file supaya tidak jadi sampah.
-      await _removeFiles([audioPath, if (coverPath != null) coverPath]);
+      await _removeFiles([audioPath, ?coverPath]);
       rethrow;
     }
 

@@ -12,6 +12,8 @@ class SongListScreen extends StatefulWidget {
   final IconData icon;
   final Future<List<Song>> Function() loader;
   final Playlist? playlist; // diisi kalau ini halaman playlist
+  final String? emptyText; // pesan kalau daftar kosong (opsional)
+  final bool allowSaveAsPlaylist; // tampilkan tombol "Simpan jadi playlist"
 
   const SongListScreen({
     super.key,
@@ -19,6 +21,8 @@ class SongListScreen extends StatefulWidget {
     required this.icon,
     required this.loader,
     this.playlist,
+    this.emptyText,
+    this.allowSaveAsPlaylist = false,
   });
 
   @override
@@ -27,6 +31,13 @@ class SongListScreen extends StatefulWidget {
 
 class _SongListScreenState extends State<SongListScreen> {
   late Future<List<Song>> _future;
+  bool _saving = false;
+  bool _saved = false;
+
+  static const _months = [
+    'Jan', 'Feb', 'Mar', 'Apr', 'Mei', 'Jun',
+    'Jul', 'Agu', 'Sep', 'Okt', 'Nov', 'Des',
+  ];
 
   @override
   void initState() {
@@ -38,6 +49,48 @@ class _SongListScreenState extends State<SongListScreen> {
     setState(() {
       _future = widget.loader();
     });
+  }
+
+  /// Simpan isi halaman ini sebagai playlist baru.
+  /// Lagu dimasukkan satu per satu supaya urutannya tetap sama.
+  Future<void> _saveAsPlaylist() async {
+    final messenger = ScaffoldMessenger.of(context);
+
+    List<Song> songs;
+    try {
+      songs = await _future;
+    } catch (_) {
+      return;
+    }
+
+    if (songs.isEmpty) {
+      messenger.showSnackBar(
+        const SnackBar(content: Text('Belum ada lagu untuk disimpan')),
+      );
+      return;
+    }
+
+    setState(() => _saving = true);
+    final now = DateTime.now();
+    final name = '${widget.title} ${now.day} ${_months[now.month - 1]}';
+
+    try {
+      final svc = LibraryService();
+      final created = await svc.createPlaylist(name);
+      for (final song in songs) {
+        await svc.addToPlaylist(created.id, song);
+      }
+      if (mounted) setState(() => _saved = true);
+      messenger.showSnackBar(
+        SnackBar(content: Text('Disimpan sebagai "$name"')),
+      );
+    } catch (e) {
+      messenger.showSnackBar(
+        SnackBar(content: Text('Gagal menyimpan: $e')),
+      );
+    } finally {
+      if (mounted) setState(() => _saving = false);
+    }
   }
 
   Future<void> _deletePlaylist() async {
@@ -69,6 +122,23 @@ class _SongListScreenState extends State<SongListScreen> {
     return Scaffold(
       appBar: AppBar(
         actions: [
+          if (widget.allowSaveAsPlaylist)
+            _saving
+                ? const Padding(
+              padding: EdgeInsets.all(14),
+              child: SizedBox(
+                width: 22,
+                height: 22,
+                child: CircularProgressIndicator(strokeWidth: 2.5),
+              ),
+            )
+                : IconButton(
+              tooltip: _saved ? 'Sudah disimpan' : 'Simpan jadi playlist',
+              icon: Icon(_saved
+                  ? Icons.check_rounded
+                  : Icons.playlist_add_rounded),
+              onPressed: _saved ? null : _saveAsPlaylist,
+            ),
           if (widget.playlist != null)
             IconButton(
                 icon: const Icon(Icons.delete_outline_rounded),
@@ -163,9 +233,10 @@ class _SongListScreenState extends State<SongListScreen> {
                   padding: const EdgeInsets.all(40),
                   child: Center(
                     child: Text(
-                        widget.playlist != null
-                            ? 'Playlist masih kosong.\nTambah lagu lewat menu ⋯ di lagu mana saja 💗'
-                            : 'Belum ada lagu yang disukai.',
+                        widget.emptyText ??
+                            (widget.playlist != null
+                                ? 'Playlist masih kosong.\nTambah lagu lewat menu ⋯ di lagu mana saja 💗'
+                                : 'Belum ada lagu yang disukai.'),
                         textAlign: TextAlign.center,
                         style: TextStyle(color: cs.onSurfaceVariant)),
                   ),

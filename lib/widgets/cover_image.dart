@@ -1,5 +1,7 @@
 import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/material.dart';
+import 'package:provider/provider.dart';
+import '../providers/data_saver_provider.dart';
 
 class CoverImage extends StatelessWidget {
   final String? url;
@@ -10,6 +12,8 @@ class CoverImage extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final cs = Theme.of(context).colorScheme;
+    // Mode hemat data: jangan unduh gambar, pakai ikon saja.
+    final saver = context.watch<DataSaverProvider>().enabled;
     final placeholder = Container(
       width: size,
       height: size,
@@ -19,15 +23,15 @@ class CoverImage extends StatelessWidget {
     );
     return ClipRRect(
       borderRadius: BorderRadius.circular(radius),
-      child: (url == null || url!.isEmpty)
+      child: (saver || url == null || url!.isEmpty)
           ? placeholder
           : CachedNetworkImage(
         imageUrl: url!,
         width: size,
         height: size,
         fit: BoxFit.cover,
-        placeholder: (_, __) => placeholder,
-        errorWidget: (_, __, ___) => placeholder,
+        placeholder: (_, _) => placeholder,
+        errorWidget: (_, _, _) => placeholder,
       ),
     );
   }
