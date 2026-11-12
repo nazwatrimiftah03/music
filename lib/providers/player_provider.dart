@@ -17,6 +17,10 @@ class PlayerProvider extends ChangeNotifier {
 
   List<Song> _queue = [];
   int _index = -1;
+
+  /// Mode acak buatan sendiri: hanya lagu SETELAH lagu yang sedang diputar
+  /// yang diacak, dan hasilnya langsung terlihat di antrean.
+  bool _shuffleOn = false;
   String? error;
 
   Timer? _sleepTimer;
@@ -29,7 +33,7 @@ class PlayerProvider extends ChangeNotifier {
   Song? get current =>
       (_index >= 0 && _index < _queue.length) ? _queue[_index] : null;
   bool get isPlaying => player.playing;
-  bool get shuffle => player.shuffleModeEnabled;
+  bool get shuffle => _shuffleOn;
   LoopMode get loop => player.loopMode;
 
   /// Seluruh antrean (hanya untuk dibaca).
@@ -65,6 +69,13 @@ class PlayerProvider extends ChangeNotifier {
     // Disalin supaya perubahan antrean tidak ikut mengubah daftar asalnya.
     _queue = List<Song>.of(songs);
     _index = start;
+
+    // Mode acak menyala: acak lagu setelah lagu pertama yang diputar.
+    if (_shuffleOn && start >= 0 && start < _queue.length - 1) {
+      final rest = _queue.sublist(start + 1)..shuffle();
+      _queue.replaceRange(start + 1, _queue.length, rest);
+    }
+
     error = null;
     notifyListeners();
     try {
@@ -255,9 +266,43 @@ class PlayerProvider extends ChangeNotifier {
 
   Future<void> seek(Duration d) => player.seek(d);
 
+  /// Menyalakan acak = mengacak urutan lagu berikutnya di antrean.
+  /// Mematikan acak = urutan yang sekarang dibiarkan apa adanya.
+  /// (Pengacakan bawaan pemutar tidak dipakai, supaya "Putar selanjutnya"
+  /// benar-benar jadi lagu berikutnya dan antrean sesuai urutan putar.)
   Future<void> toggleShuffle() async {
-    await player.setShuffleModeEnabled(!player.shuffleModeEnabled);
+    _shuffleOn = !_shuffleOn;
     notifyListeners();
+    if (_shuffleOn) await _shuffleUpcoming();
+  }
+
+  Future<void> _shuffleUpcoming() async {
+    final start = _index + 1;
+    if (!_hasPlaylist || _index < 0 || _queue.length - start < 2) return;
+
+    final oldQueue = _queue;
+    final rest = _queue.sublist(start)..shuffle();
+
+    _queue = [..._queue.sublist(0, start), ...rest];
+    notifyListeners();
+
+    try {
+      await player.removeAudioSourceRange(start, oldQueue.length);
+      await player.insertAudioSources(start, rest.map(_toSource).toList());
+    } catch (_) {
+      // Pemutar bisa setengah berubah: kembalikan antrean lalu muat ulang
+      // pemutar dari antrean itu tanpa memutus lagu yang sedang jalan.
+      _queue = oldQueue;
+      error = 'Gagal mengacak antrean';
+      try {
+        await player.setAudioSources(
+          _queue.map(_toSource).toList(),
+          initialIndex: _index,
+          initialPosition: player.position,
+        );
+      } catch (_) {}
+      notifyListeners();
+    }
   }
 
   Future<void> cycleLoop() async {

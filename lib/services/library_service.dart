@@ -79,6 +79,9 @@ class LibraryService {
   Future<void> deletePlaylist(String id) =>
       _db.from('playlists').delete().eq('id', id);
 
+  Future<void> renamePlaylist(String id, String name) =>
+      _db.from('playlists').update({'name': name}).eq('id', id);
+
   Future<List<Song>> playlistSongs(String playlistId) async {
     final data = await _db
         .from('playlist_songs')

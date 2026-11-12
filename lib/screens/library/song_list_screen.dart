@@ -5,6 +5,7 @@ import '../../models/song.dart';
 import '../../providers/player_provider.dart';
 import '../../services/library_service.dart';
 import '../../widgets/mini_player.dart';
+import '../../widgets/song_menu.dart';
 import '../../widgets/song_tile.dart';
 
 class SongListScreen extends StatefulWidget {
@@ -33,6 +34,7 @@ class _SongListScreenState extends State<SongListScreen> {
   late Future<List<Song>> _future;
   bool _saving = false;
   bool _saved = false;
+  late String _title;
 
   static const _months = [
     'Jan', 'Feb', 'Mar', 'Apr', 'Mei', 'Jun',
@@ -42,6 +44,7 @@ class _SongListScreenState extends State<SongListScreen> {
   @override
   void initState() {
     super.initState();
+    _title = widget.title;
     _future = widget.loader();
   }
 
@@ -93,12 +96,28 @@ class _SongListScreenState extends State<SongListScreen> {
     }
   }
 
+  Future<void> _renamePlaylist() async {
+    final messenger = ScaffoldMessenger.of(context);
+    final name = await promptPlaylistName(context, initial: _title);
+    if (name == null || name == _title) return;
+
+    try {
+      await LibraryService().renamePlaylist(widget.playlist!.id, name);
+      if (mounted) setState(() => _title = name);
+      messenger.showSnackBar(
+        const SnackBar(content: Text('Nama playlist diubah')),
+      );
+    } catch (e) {
+      messenger.showSnackBar(SnackBar(content: Text('Gagal: $e')));
+    }
+  }
+
   Future<void> _deletePlaylist() async {
     final ok = await showDialog<bool>(
       context: context,
       builder: (ctx) => AlertDialog(
         title: const Text('Hapus playlist?'),
-        content: Text('"${widget.playlist!.name}" akan dihapus permanen.'),
+        content: Text('"$_title" akan dihapus permanen.'),
         actions: [
           TextButton(
               onPressed: () => Navigator.pop(ctx, false),
@@ -139,10 +158,18 @@ class _SongListScreenState extends State<SongListScreen> {
                   : Icons.playlist_add_rounded),
               onPressed: _saved ? null : _saveAsPlaylist,
             ),
-          if (widget.playlist != null)
+          if (widget.playlist != null) ...[
             IconButton(
-                icon: const Icon(Icons.delete_outline_rounded),
-                onPressed: _deletePlaylist),
+              tooltip: 'Ganti nama',
+              icon: const Icon(Icons.edit_outlined),
+              onPressed: _renamePlaylist,
+            ),
+            IconButton(
+              tooltip: 'Hapus playlist',
+              icon: const Icon(Icons.delete_outline_rounded),
+              onPressed: _deletePlaylist,
+            ),
+          ],
         ],
       ),
       bottomNavigationBar: const SafeArea(child: MiniPlayer()),
@@ -184,7 +211,7 @@ class _SongListScreenState extends State<SongListScreen> {
               const SizedBox(height: 20),
               Padding(
                 padding: const EdgeInsets.symmetric(horizontal: 20),
-                child: Text(widget.title,
+                child: Text(_title,
                     style: Theme.of(context)
                         .textTheme
                         .headlineSmall

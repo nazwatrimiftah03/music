@@ -9,12 +9,15 @@ import '../services/library_service.dart';
 import 'cover_image.dart';
 
 /// Dialog input nama playlist. Return null kalau dibatalkan.
-Future<String?> promptPlaylistName(BuildContext context) {
-  final ctrl = TextEditingController();
+Future<String?> promptPlaylistName(
+    BuildContext context, {
+      String? initial,
+    }) {
+  final ctrl = TextEditingController(text: initial);
   return showDialog<String>(
     context: context,
     builder: (ctx) => AlertDialog(
-      title: const Text('Playlist baru'),
+      title: Text(initial == null ? 'Playlist baru' : 'Ganti nama playlist'),
       content: TextField(
         controller: ctrl,
         autofocus: true,
@@ -29,7 +32,7 @@ Future<String?> promptPlaylistName(BuildContext context) {
             final t = ctrl.text.trim();
             Navigator.pop(ctx, t.isEmpty ? null : t);
           },
-          child: const Text('Buat'),
+          child: Text(initial == null ? 'Buat' : 'Simpan'),
         ),
       ],
     ),
