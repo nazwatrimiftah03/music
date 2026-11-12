@@ -100,6 +100,25 @@ class SongService {
     ].where((s) => seen.add(s.id)).toList();
   }
 
+  /// Lagu paling banyak didengar di PinkBeat (dihitung dari jumlah akun yang
+  /// pernah memutar lagu itu). Isi [artist] untuk membatasi ke satu artis.
+  /// Butuh fungsi SQL `popular_songs` di Supabase; kalau belum ada atau
+  /// gagal, hasilnya kosong supaya tampilan tetap jalan seperti biasa.
+  Future<List<Song>> popular({String? artist, int limit = 20}) async {
+    try {
+      final data = await Supabase.instance.client.rpc(
+        'popular_songs',
+        params: {'p_artist': artist, 'p_limit': limit},
+      );
+      return (data as List)
+          .map((e) => Song.fromMap(Map<String, dynamic>.from(e as Map)))
+          .where((s) => s.audioUrl.isNotEmpty)
+          .toList();
+    } catch (_) {
+      return <Song>[];
+    }
+  }
+
   Future<List<Song>> byGenre(String genre) {
     if (genre == indonesiaTag) return indonesiaHits();
     return _jamendo.songsByGenre(genre);

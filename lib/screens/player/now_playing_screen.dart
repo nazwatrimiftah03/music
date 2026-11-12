@@ -5,6 +5,7 @@ import '../../providers/likes_provider.dart';
 import '../../providers/player_provider.dart';
 import '../../widgets/cover_image.dart';
 import '../artist/artist_screen.dart';
+import '../../widgets/lyrics_sheet.dart';
 import '../../widgets/queue_sheet.dart';
 import '../../widgets/sleep_timer_sheet.dart';
 import '../../widgets/song_menu.dart';
@@ -219,6 +220,12 @@ class _NowPlayingScreenState extends State<NowPlayingScreen> {
                   mainAxisAlignment: MainAxisAlignment.spaceBetween,
                   children: [
                     const SleepTimerButton(),
+                    IconButton(
+                      tooltip: 'Lirik',
+                      icon: Icon(Icons.lyrics_outlined,
+                          color: cs.onSurfaceVariant),
+                      onPressed: () => showLyricsSheet(context),
+                    ),
                     IconButton(
                       tooltip: 'Antrean',
                       icon: Icon(Icons.queue_music_rounded,
