@@ -1,8 +1,9 @@
-import 'package:supabase_flutter/supabase_flutter.dart';
+﻿import 'package:supabase_flutter/supabase_flutter.dart';
 import '../models/playlist.dart';
 import '../models/song.dart';
+import 'likes_service.dart';
 
-class LibraryService {
+class LibraryService implements LikesService {
   final SupabaseClient _db = Supabase.instance.client;
   String get _uid => _db.auth.currentUser!.id;
 
@@ -24,6 +25,7 @@ class LibraryService {
   Future<void> ensureSong(Song song) => _ensureSong(song);
 
   // ===== LIKED SONGS =====
+  @override
   Future<Set<String>> likedIds() async {
     final data =
     await _db.from('liked_songs').select('song_id').eq('user_id', _uid);
@@ -42,6 +44,7 @@ class LibraryService {
         .toList();
   }
 
+  @override
   Future<void> like(Song song) async {
     await _ensureSong(song);
     await _db
@@ -49,6 +52,7 @@ class LibraryService {
         .insert({'user_id': _uid, 'song_id': song.id});
   }
 
+  @override
   Future<void> unlike(String songId) => _db
       .from('liked_songs')
       .delete()
@@ -109,3 +113,5 @@ class LibraryService {
       .eq('playlist_id', playlistId)
       .eq('song_id', songId);
 }
+
+

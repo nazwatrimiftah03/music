@@ -1,3 +1,4 @@
+
 import 'dart:math';
 
 import '../models/song.dart';
@@ -5,22 +6,89 @@ import 'itunes_service.dart';
 import 'jamendo_service.dart';
 import 'library_service.dart';
 
-/// Rekomendasi "Untuk kamu":
-/// - Lagu Jamendo  -> genre favorit (dari like bobot 2 + riwayat bobot 1),
-///   lalu lagu populer genre itu diambil dari Jamendo.
-/// - Lagu iTunes   -> artis favorit, lalu lagu lain dari artis itu.
-/// Lagu yang sudah pernah didengar/di-like tidak ditampilkan lagi.
+/// Layanan rekomendasi lagu PinkBeat.
 class RecommendationService {
   final JamendoService _jamendo = JamendoService();
   final ItunesService _itunes = ItunesService();
   final LibraryService _library = LibraryService();
 
-  bool _isItunes(Song song) => song.id.startsWith(ItunesService.idPrefix);
+  bool _isItunes(Song song) =>
+      song.id.startsWith(ItunesService.idPrefix);
 
   List<String> _top(Map<String, int> scores, int count) {
     final entries = scores.entries.toList()
       ..sort((a, b) => b.value.compareTo(a.value));
+
     return entries.take(count).map((e) => e.key).toList();
+  }
+
+  /// Menghapus lagu duplikat dan lagu tanpa audio.
+  List<Song> _uniqueSongs(
+      Iterable<Song> songs, {
+        required int limit,
+      }) {
+    final seen = <String>{};
+    final result = <Song>[];
+
+    for (final song in songs) {
+      if (song.id.isEmpty || song.audioUrl.isEmpty) continue;
+
+      if (seen.add(song.id)) {
+        result.add(song);
+      }
+
+      if (result.length >= limit) break;
+    }
+
+    return result;
+  }
+
+  /// Mengambil lagu cadangan dari Jamendo dan iTunes.
+  Future<List<Song>> _fallback({
+    required Set<String> heard,
+    required int limit,
+  }) async {
+    final lists = <List<Song>>[];
+
+    // Sumber pertama: Jamendo.
+    try {
+      final songs = await _jamendo.fetchTrendingSongs(
+        limit: limit + heard.length,
+      );
+
+      if (songs.isNotEmpty) {
+        lists.add(songs);
+      }
+    } catch (_) {
+      // Lanjut ke iTunes jika Jamendo gagal.
+    }
+
+    // Sumber kedua: iTunes.
+    // Digunakan jika Jamendo tidak menghasilkan lagu yang cukup.
+    if (lists.isEmpty ||
+        _uniqueSongs(
+          lists.expand((songs) => songs).where(
+                (song) => !heard.contains(song.id),
+          ),
+          limit: limit,
+        ).length < limit) {
+      try {
+        final hits = await _itunes.indonesiaHits(perArtist: 5);
+        lists.add(hits);
+      } catch (_) {
+        // Tetap gunakan hasil Jamendo jika iTunes juga gagal.
+      }
+    }
+
+    final combined = interleaveSongs(
+      lists,
+      limit: limit + heard.length,
+    );
+
+    return _uniqueSongs(
+      combined.where((song) => !heard.contains(song.id)),
+      limit: limit,
+    );
   }
 
   Future<List<Song>> forYou({
@@ -29,25 +97,40 @@ class RecommendationService {
     int topGenres = 3,
     int topArtists = 2,
   }) async {
+    if (limit <= 0) return [];
+
     List<Song> liked = [];
+
     try {
       liked = await _library.likedSongs();
     } catch (_) {
-      // Tanpa data like, rekomendasi tetap jalan dari riwayat.
+      // Tetap gunakan riwayat jika data like gagal dimuat.
     }
 
-    // 1. Hitung skor genre (Jamendo) dan artis (iTunes).
+    final heard = <String>{
+      ...history.map((song) => song.id),
+      ...liked.map((song) => song.id),
+    };
+
     final genreScore = <String, int>{};
     final artistScore = <String, int>{};
 
     void count(Iterable<Song> songs, int weight) {
-      for (final s in songs) {
-        if (_isItunes(s)) {
-          artistScore[s.artist] = (artistScore[s.artist] ?? 0) + weight;
+      for (final song in songs) {
+        if (_isItunes(song)) {
+          final artist = song.artist.trim();
+
+          if (artist.isNotEmpty) {
+            artistScore[artist] =
+                (artistScore[artist] ?? 0) + weight;
+          }
         } else {
-          final g = s.genre;
-          if (g == null || g.isEmpty) continue;
-          genreScore[g] = (genreScore[g] ?? 0) + weight;
+          final genre = song.genre?.trim();
+
+          if (genre != null && genre.isNotEmpty) {
+            genreScore[genre] =
+                (genreScore[genre] ?? 0) + weight;
+          }
         }
       }
     }
@@ -55,91 +138,127 @@ class RecommendationService {
     count(liked, 2);
     count(history, 1);
 
-    // 2. Belum ada data -> tampilkan lagu populer.
+    // Belum ada data minat: gunakan fallback.
     if (genreScore.isEmpty && artistScore.isEmpty) {
-      return _jamendo.fetchTrendingSongs(limit: limit);
+      return _fallback(heard: heard, limit: limit);
     }
 
-    // 3. Ambil kandidat.
     final lists = <List<Song>>[];
 
+    // Cari lagu lain dari artis favorit melalui iTunes.
     for (final artist in _top(artistScore, topArtists)) {
       try {
-        lists.add(await _itunes.search(artist, limit: 12));
-      } catch (_) {}
-    }
+        final songs = await _itunes.search(
+          artist,
+          limit: 12,
+        );
 
-    for (final genre in _top(genreScore, topGenres)) {
-      try {
-        lists.add(await _jamendo.songsByGenre(genre, limit: limit));
+        lists.add(songs);
       } catch (_) {
-        // Satu sumber gagal tidak boleh menggagalkan semuanya.
+        // Lanjut ke sumber berikutnya.
       }
     }
 
-    // 4. Gabung bergantian, buang duplikat & lagu yang sudah pernah didengar.
-    final heard = <String>{
-      ...history.map((s) => s.id),
-      ...liked.map((s) => s.id),
-    };
+    // Cari lagu dari genre favorit melalui Jamendo.
+    for (final genre in _top(genreScore, topGenres)) {
+      try {
+        final songs = await _jamendo.songsByGenre(
+          genre,
+          limit: limit + heard.length,
+        );
+
+        lists.add(songs);
+      } catch (_) {
+        // Lanjut ke sumber berikutnya.
+      }
+    }
 
     final filtered = [
       for (final list in lists)
-        list.where((song) => !heard.contains(song.id)).toList(),
+        list.where((song) {
+          return song.id.isNotEmpty &&
+              song.audioUrl.isNotEmpty &&
+              !heard.contains(song.id);
+        }).toList(),
     ];
 
-    final result = interleaveSongs(filtered, limit: limit);
+    final combined = interleaveSongs(
+      filtered,
+      limit: limit + heard.length,
+    );
 
-    // Semua gagal / sudah pernah didengar -> tetap tampilkan sesuatu.
+    final result = _uniqueSongs(
+      combined.where((song) => !heard.contains(song.id)),
+      limit: limit,
+    );
+
+    // Jika hasil rekomendasi kosong, gunakan fallback.
     if (result.isEmpty) {
-      return _jamendo.fetchTrendingSongs(limit: limit);
+      return _fallback(heard: heard, limit: limit);
     }
 
     return result;
   }
 
-  /// "Mix harian": selang-seling lagu yang kamu sukai dan lagu baru hasil
-  /// rekomendasi. Urutannya diacak dengan benih tanggal hari ini, jadi mix
-  /// tetap sama sepanjang hari dan berganti besok.
+  /// Mix harian: selang-seling lagu favorit dan rekomendasi baru.
   Future<List<Song>> dailyMix({
     required List<Song> history,
     int limit = 25,
   }) async {
+    if (limit <= 0) return [];
+
     List<Song> liked = [];
+
     try {
       liked = await _library.likedSongs();
     } catch (_) {
-      // Tanpa data like, mix tetap dibuat dari rekomendasi.
+      // Mix tetap bisa dibuat dari rekomendasi.
     }
 
     List<Song> fresh = [];
+
     try {
-      fresh = await forYou(history: history, limit: limit);
+      fresh = await forYou(
+        history: history,
+        limit: limit,
+      );
     } catch (_) {
-      // Rekomendasi gagal: pakai lagu yang disukai saja.
+      // Jika rekomendasi gagal, gunakan lagu favorit.
     }
 
     final now = DateTime.now();
-    final rng = Random(now.year * 10000 + now.month * 100 + now.day);
+
+    final rng = Random(
+      now.year * 10000 + now.month * 100 + now.day,
+    );
+
     final favorites = [...liked]..shuffle(rng);
     final discoveries = [...fresh]..shuffle(rng);
 
     final seen = <String>{};
     final mix = <Song>[];
+
     var a = 0;
     var b = 0;
 
-    // Pola: 1 lagu favorit, lalu 1 lagu baru, dan seterusnya.
     while (mix.length < limit &&
         (a < favorites.length || b < discoveries.length)) {
       if (a < favorites.length) {
-        final s = favorites[a++];
-        if (seen.add(s.id)) mix.add(s);
+        final song = favorites[a++];
+
+        if (song.id.isNotEmpty && seen.add(song.id)) {
+          mix.add(song);
+        }
       }
+
       if (mix.length >= limit) break;
+
       if (b < discoveries.length) {
-        final s = discoveries[b++];
-        if (seen.add(s.id)) mix.add(s);
+        final song = discoveries[b++];
+
+        if (song.id.isNotEmpty && seen.add(song.id)) {
+          mix.add(song);
+        }
       }
     }
 

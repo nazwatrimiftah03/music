@@ -1,6 +1,9 @@
+
 import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
+
 import '../../models/song.dart';
 import '../../providers/player_provider.dart';
 import '../../services/song_service.dart';
@@ -14,17 +17,20 @@ class SearchScreen extends StatefulWidget {
 }
 
 class _SearchScreenState extends State<SearchScreen> {
-  final _svc = SongService();
-  final _ctrl = TextEditingController();
+  final SongService _svc = SongService();
+  final TextEditingController _ctrl = TextEditingController();
+
   Timer? _debounce;
 
   List<Song> _results = [];
+
   bool _loading = false;
   bool _error = false;
-  String? _genreLabel;
 
-  // (label tampilan, tag di Jamendo)
-  static const _genres = [
+  String? _genreLabel;
+  int _requestId = 0;
+
+  static const List<(String, String)> _genres = [
     ('Indonesia', 'indonesia'),
     ('Pop', 'pop'),
     ('Rock', 'rock'),
@@ -38,7 +44,7 @@ class _SearchScreenState extends State<SearchScreen> {
     ('Reggae', 'reggae'),
   ];
 
-  static const _genreColors = [
+  static const List<Color> _genreColors = [
     Color(0xFFE8115B),
     Color(0xFF8D67AB),
     Color(0xFF1E3264),
@@ -49,6 +55,23 @@ class _SearchScreenState extends State<SearchScreen> {
     Color(0xFF7358FF),
   ];
 
+  static const List<IconData> _genreIcons = [
+    Icons.flag_rounded,
+    Icons.music_note_rounded,
+    Icons.album_rounded,
+    Icons.graphic_eq_rounded,
+    Icons.mic_rounded,
+    Icons.piano_rounded,
+    Icons.library_music_rounded,
+    Icons.headphones_rounded,
+    Icons.spa_rounded,
+    Icons.queue_music_rounded,
+    Icons.waves_rounded,
+  ];
+
+  bool get _showingResults =>
+      _genreLabel != null || _ctrl.text.trim().isNotEmpty;
+
   @override
   void dispose() {
     _debounce?.cancel();
@@ -56,12 +79,12 @@ class _SearchScreenState extends State<SearchScreen> {
     super.dispose();
   }
 
-  bool get _showingResults =>
-      _genreLabel != null || _ctrl.text.trim().isNotEmpty;
-
-  void _onChanged(String q) {
+  void _onChanged(String value) {
     _debounce?.cancel();
-    final query = q.trim();
+
+    final query = value.trim();
+    final request = ++_requestId;
+
     setState(() {
       _genreLabel = null;
       _error = false;
@@ -75,57 +98,77 @@ class _SearchScreenState extends State<SearchScreen> {
       return;
     }
 
-    setState(() => _loading = true);
-    _debounce = Timer(const Duration(milliseconds: 400), () async {
-      try {
-        final r = await _svc.search(query);
-        if (mounted && _ctrl.text.trim() == query) {
-          setState(() {
-            _results = r;
-            _loading = false;
-          });
-        }
-      } catch (_) {
-        if (mounted && _ctrl.text.trim() == query) {
-          setState(() {
-            _error = true;
-            _loading = false;
-          });
-        }
-      }
+    setState(() {
+      _loading = true;
+      _results = [];
     });
+
+    _debounce = Timer(
+      const Duration(milliseconds: 450),
+          () => _search(query, request),
+    );
+  }
+
+  Future<void> _search(String query, int request) async {
+    try {
+      final songs = await _svc.search(query);
+
+      if (!mounted || request != _requestId) return;
+
+      setState(() {
+        _results = songs;
+        _loading = false;
+        _error = false;
+      });
+    } catch (_) {
+      if (!mounted || request != _requestId) return;
+
+      setState(() {
+        _loading = false;
+        _error = true;
+      });
+    }
   }
 
   Future<void> _pickGenre(String label, String tag) async {
     _debounce?.cancel();
+
+    final request = ++_requestId;
+
     _ctrl.clear();
+
     setState(() {
       _genreLabel = label;
       _loading = true;
       _error = false;
       _results = [];
     });
+
     try {
-      final r = await _svc.byGenre(tag);
-      if (mounted && _genreLabel == label) {
-        setState(() {
-          _results = r;
-          _loading = false;
-        });
-      }
+      final songs = await _svc.byGenre(tag);
+
+      if (!mounted || request != _requestId) return;
+
+      setState(() {
+        _results = songs;
+        _loading = false;
+      });
     } catch (_) {
-      if (mounted && _genreLabel == label) {
-        setState(() {
-          _error = true;
-          _loading = false;
-        });
-      }
+      if (!mounted || request != _requestId) return;
+
+      setState(() {
+        _loading = false;
+        _error = true;
+      });
     }
   }
 
   void _clear() {
     _debounce?.cancel();
+    _requestId++;
+
     _ctrl.clear();
+
     setState(() {
       _genreLabel = null;
       _results = [];
@@ -134,117 +177,484 @@ class _SearchScreenState extends State<SearchScreen> {
     });
   }
 
+  Future<void> _retry() async {
+    if (_genreLabel != null) {
+      final genre = _genres.firstWhere(
+            (item) => item.$1 == _genreLabel,
+        orElse: () => _genres[0],
+      );
+
+      await _pickGenre(genre.$1, genre.$2);
+    } else {
+      final query = _ctrl.text.trim();
+
+      if (query.isNotEmpty) {
+        final request = ++_requestId;
+
+        setState(() {
+          _loading = true;
+          _error = false;
+        });
+
+        await _search(query, request);
+      }
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
-    final cs = Theme.of(context).colorScheme;
+    final theme = Theme.of(context);
+    final cs = theme.colorScheme;
     final player = context.read<PlayerProvider>();
 
-    return SafeArea(
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Padding(
-            padding: const EdgeInsets.fromLTRB(20, 16, 20, 12),
-            child: Text('Cari',
-                style: Theme.of(context)
-                    .textTheme
-                    .headlineMedium
-                    ?.copyWith(fontWeight: FontWeight.w800)),
-          ),
-          Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 20),
-            child: TextField(
-              controller: _ctrl,
-              onChanged: _onChanged,
-              decoration: InputDecoration(
-                hintText: 'Lagu atau artis',
-                prefixIcon: const Icon(Icons.search_rounded),
-                suffixIcon: _showingResults
-                    ? IconButton(
-                  icon: const Icon(Icons.close_rounded),
-                  onPressed: _clear,
-                )
-                    : null,
-              ),
-            ),
-          ),
-          const SizedBox(height: 8),
-          if (_genreLabel != null)
+    return Material(
+      color: theme.scaffoldBackgroundColor,
+      child: SafeArea(
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
             Padding(
-              padding: const EdgeInsets.fromLTRB(20, 4, 20, 4),
-              child: Chip(
-                label: Text('Genre: $_genreLabel'),
-                backgroundColor: cs.primaryContainer,
-                side: BorderSide.none,
+              padding: const EdgeInsets.fromLTRB(20, 20, 20, 16),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Row(
+                    children: [
+                      Expanded(
+                        child: Text(
+                          'Temukan Musik',
+                          style: theme.textTheme.headlineMedium?.copyWith(
+                            fontWeight: FontWeight.w900,
+                            letterSpacing: -0.8,
+                          ),
+                        ),
+                      ),
+                      Container(
+                        padding: const EdgeInsets.all(11),
+                        decoration: BoxDecoration(
+                          color: cs.primaryContainer,
+                          shape: BoxShape.circle,
+                        ),
+                        child: Icon(
+                          Icons.headphones_rounded,
+                          color: cs.primary,
+                          size: 23,
+                        ),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 5),
+                  Text(
+                    'Cari lagu favorit dan temukan musik baru.',
+                    style: theme.textTheme.bodyMedium?.copyWith(
+                      color: cs.onSurfaceVariant,
+                    ),
+                  ),
+                  const SizedBox(height: 20),
+
+                  // Search bar
+                  Container(
+                    decoration: BoxDecoration(
+                      color: cs.surfaceContainerLow,
+                      borderRadius: BorderRadius.circular(18),
+                      border: Border.all(
+                        color: cs.outlineVariant.withValues(alpha: 0.5),
+                      ),
+                    ),
+                    child: TextField(
+                      controller: _ctrl,
+                      onChanged: _onChanged,
+                      textInputAction: TextInputAction.search,
+                      decoration: InputDecoration(
+                        hintText: 'Cari lagu atau nama artis...',
+                        hintStyle: TextStyle(
+                          color: cs.onSurfaceVariant,
+                          fontSize: 14,
+                        ),
+                        prefixIcon: Icon(
+                          Icons.search_rounded,
+                          color: cs.primary,
+                        ),
+                        suffixIcon: _showingResults
+                            ? IconButton(
+                          onPressed: _clear,
+                          icon: const Icon(Icons.close_rounded),
+                          tooltip: 'Hapus pencarian',
+                        )
+                            : null,
+                        border: InputBorder.none,
+                        contentPadding: const EdgeInsets.symmetric(
+                          horizontal: 16,
+                          vertical: 17,
+                        ),
+                      ),
+                    ),
+                  ),
+                ],
               ),
             ),
-          Expanded(
-            child: !_showingResults
-                ? _buildGenres()
-                : _loading
-                ? Center(
-                child: CircularProgressIndicator(color: cs.primary))
-                : _error
-                ? Center(
-                child: Text('Gagal memuat. Cek koneksi kamu 🥲',
-                    style: TextStyle(color: cs.onSurfaceVariant)))
-                : _results.isEmpty
-                ? Center(
-                child: Text('Tidak ada hasil 🥲',
-                    style:
-                    TextStyle(color: cs.onSurfaceVariant)))
-                : ListView.builder(
-              itemCount: _results.length,
-              itemBuilder: (_, i) => SongTile(
-                song: _results[i],
-                onTap: () => player.playQueue(_results, i),
+
+            if (_genreLabel != null)
+              Padding(
+                padding: const EdgeInsets.fromLTRB(20, 0, 20, 12),
+                child: Row(
+                  children: [
+                    Icon(
+                      Icons.filter_list_rounded,
+                      color: cs.primary,
+                      size: 19,
+                    ),
+                    const SizedBox(width: 8),
+                    Text(
+                      'Genre:',
+                      style: TextStyle(
+                        color: cs.onSurfaceVariant,
+                        fontWeight: FontWeight.w500,
+                      ),
+                    ),
+                    const SizedBox(width: 6),
+                    Chip(
+                      label: Text(_genreLabel!),
+                      backgroundColor: cs.primaryContainer,
+                      labelStyle: TextStyle(
+                        color: cs.primary,
+                        fontWeight: FontWeight.w700,
+                      ),
+                      side: BorderSide.none,
+                      deleteIcon: Icon(
+                        Icons.close_rounded,
+                        size: 17,
+                        color: cs.primary,
+                      ),
+                      onDeleted: _clear,
+                    ),
+                  ],
+                ),
+              ),
+
+            Expanded(
+              child: !_showingResults
+                  ? _buildGenres()
+                  : _loading
+                  ? _buildLoading()
+                  : _error
+                  ? _buildError()
+                  : _results.isEmpty
+                  ? _buildEmpty()
+                  : _buildResults(player, cs),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildGenres() {
+    final theme = Theme.of(context);
+    final cs = theme.colorScheme;
+
+    return ListView(
+      padding: const EdgeInsets.fromLTRB(20, 4, 20, 24),
+      children: [
+        Row(
+          children: [
+            Text(
+              'Jelajahi Genre',
+              style: theme.textTheme.titleLarge?.copyWith(
+                fontWeight: FontWeight.w900,
               ),
             ),
+            const Spacer(),
+            Text(
+              '${_genres.length} genre',
+              style: theme.textTheme.bodySmall?.copyWith(
+                color: cs.onSurfaceVariant,
+              ),
+            ),
+          ],
+        ),
+        const SizedBox(height: 6),
+        Text(
+          'Pilih genre sesuai suasana hatimu.',
+          style: theme.textTheme.bodyMedium?.copyWith(
+            color: cs.onSurfaceVariant,
+          ),
+        ),
+        const SizedBox(height: 18),
+
+        GridView.builder(
+          itemCount: _genres.length,
+          shrinkWrap: true,
+          physics: const NeverScrollableScrollPhysics(),
+          gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
+            crossAxisCount: 2,
+            mainAxisSpacing: 12,
+            crossAxisSpacing: 12,
+            childAspectRatio: 1.75,
+          ),
+          itemBuilder: (context, index) {
+            final genre = _genres[index];
+
+            return _GenreCard(
+              label: genre.$1,
+              icon: _genreIcons[index],
+              color: _genreColors[index % _genreColors.length],
+              onTap: () => _pickGenre(genre.$1, genre.$2),
+            );
+          },
+        ),
+
+        const SizedBox(height: 20),
+
+        Container(
+          padding: const EdgeInsets.all(18),
+          decoration: BoxDecoration(
+            color: cs.primaryContainer.withValues(alpha: 0.65),
+            borderRadius: BorderRadius.circular(20),
+          ),
+          child: Row(
+            children: [
+              Icon(
+                Icons.favorite_rounded,
+                color: cs.primary,
+                size: 30,
+              ),
+              const SizedBox(width: 13),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      'Musik untuk setiap suasana',
+                      style: theme.textTheme.titleSmall?.copyWith(
+                        fontWeight: FontWeight.w800,
+                      ),
+                    ),
+                    const SizedBox(height: 4),
+                    Text(
+                      'Temukan lagu yang cocok untuk menemani harimu.',
+                      style: theme.textTheme.bodySmall?.copyWith(
+                        color: cs.onSurfaceVariant,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ),
+        ),
+      ],
+    );
+  }
+
+  Widget _buildResults(PlayerProvider player, ColorScheme cs) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Padding(
+          padding: const EdgeInsets.fromLTRB(20, 4, 20, 12),
+          child: Row(
+            children: [
+              Expanded(
+                child: Text(
+                  _genreLabel != null
+                      ? 'Lagu $_genreLabel'
+                      : 'Hasil Pencarian',
+                  style: Theme.of(context).textTheme.titleLarge?.copyWith(
+                    fontWeight: FontWeight.w900,
+                  ),
+                ),
+              ),
+              Text(
+                '${_results.length} lagu',
+                style: TextStyle(
+                  color: cs.onSurfaceVariant,
+                  fontSize: 12,
+                ),
+              ),
+            ],
+          ),
+        ),
+        Expanded(
+          child: ListView.builder(
+            padding: const EdgeInsets.only(bottom: 24),
+            itemCount: _results.length,
+            itemBuilder: (context, index) {
+              return SongTile(
+                song: _results[index],
+                onTap: () => player.playQueue(_results, index),
+              );
+            },
+          ),
+        ),
+      ],
+    );
+  }
+
+  Widget _buildLoading() {
+    final cs = Theme.of(context).colorScheme;
+
+    return Center(
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          CircularProgressIndicator(color: cs.primary),
+          const SizedBox(height: 16),
+          Text(
+            'Sedang mencari musik...',
+            style: TextStyle(color: cs.onSurfaceVariant),
           ),
         ],
       ),
     );
   }
 
-  Widget _buildGenres() {
-    return ListView(
-      padding: const EdgeInsets.all(20),
-      children: [
-        Text('Jelajahi genre',
-            style: Theme.of(context)
-                .textTheme
-                .titleLarge
-                ?.copyWith(fontWeight: FontWeight.w800)),
-        const SizedBox(height: 14),
-        GridView.count(
-          crossAxisCount: 2,
-          shrinkWrap: true,
-          physics: const NeverScrollableScrollPhysics(),
-          mainAxisSpacing: 12,
-          crossAxisSpacing: 12,
-          childAspectRatio: 2.0,
+  Widget _buildEmpty() {
+    final cs = Theme.of(context).colorScheme;
+
+    return Center(
+      child: Padding(
+        padding: const EdgeInsets.all(30),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
           children: [
-            for (var i = 0; i < _genres.length; i++)
-              InkWell(
-                borderRadius: BorderRadius.circular(16),
-                onTap: () => _pickGenre(_genres[i].$1, _genres[i].$2),
-                child: Container(
-                  padding: const EdgeInsets.all(14),
-                  alignment: Alignment.bottomLeft,
-                  decoration: BoxDecoration(
-                    color: _genreColors[i % _genreColors.length],
-                    borderRadius: BorderRadius.circular(16),
-                  ),
-                  child: Text(_genres[i].$1,
-                      style: const TextStyle(
-                          color: Colors.white,
-                          fontWeight: FontWeight.w800,
-                          fontSize: 16)),
-                ),
+            Icon(
+              Icons.music_off_rounded,
+              size: 65,
+              color: cs.onSurfaceVariant.withValues(alpha: 0.55),
+            ),
+            const SizedBox(height: 16),
+            Text(
+              'Lagu tidak ditemukan',
+              style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                fontWeight: FontWeight.w800,
               ),
+            ),
+            const SizedBox(height: 7),
+            Text(
+              'Coba kata kunci atau genre yang berbeda.',
+              textAlign: TextAlign.center,
+              style: TextStyle(color: cs.onSurfaceVariant),
+            ),
+            const SizedBox(height: 18),
+            OutlinedButton.icon(
+              onPressed: _clear,
+              icon: const Icon(Icons.search_rounded),
+              label: const Text('Cari lagi'),
+            ),
           ],
         ),
-      ],
+      ),
+    );
+  }
+
+  Widget _buildError() {
+    final cs = Theme.of(context).colorScheme;
+
+    return Center(
+      child: Padding(
+        padding: const EdgeInsets.all(30),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(
+              Icons.wifi_off_rounded,
+              size: 60,
+              color: cs.error,
+            ),
+            const SizedBox(height: 16),
+            Text(
+              'Gagal memuat musik',
+              style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                fontWeight: FontWeight.w800,
+              ),
+            ),
+            const SizedBox(height: 7),
+            Text(
+              'Periksa koneksi internet, lalu coba lagi.',
+              textAlign: TextAlign.center,
+              style: TextStyle(color: cs.onSurfaceVariant),
+            ),
+            const SizedBox(height: 18),
+            FilledButton.icon(
+              onPressed: _retry,
+              icon: const Icon(Icons.refresh_rounded),
+              label: const Text('Coba Lagi'),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _GenreCard extends StatelessWidget {
+  final String label;
+  final IconData icon;
+  final Color color;
+  final VoidCallback onTap;
+
+  const _GenreCard({
+    required this.label,
+    required this.icon,
+    required this.color,
+    required this.onTap,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Material(
+      color: color,
+      borderRadius: BorderRadius.circular(18),
+      clipBehavior: Clip.antiAlias,
+      child: InkWell(
+        onTap: onTap,
+        child: Stack(
+          children: [
+            Positioned(
+              right: -13,
+              top: -17,
+              child: Icon(
+                icon,
+                size: 90,
+                color: Colors.white.withValues(alpha: 0.13),
+              ),
+            ),
+            Padding(
+              padding: const EdgeInsets.all(15),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                mainAxisAlignment: MainAxisAlignment.end,
+                children: [
+                  Icon(
+                    icon,
+                    size: 25,
+                    color: Colors.white,
+                  ),
+                  const Spacer(),
+                  Text(
+                    label,
+                    style: const TextStyle(
+                      color: Colors.white,
+                      fontSize: 16,
+                      fontWeight: FontWeight.w900,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            Positioned(
+              right: 12,
+              bottom: 12,
+              child: Icon(
+                Icons.arrow_forward_rounded,
+                size: 17,
+                color: Colors.white,
+              ),
+            ),
+          ],
+        ),
+      ),
     );
   }
 }

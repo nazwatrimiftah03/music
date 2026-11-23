@@ -20,6 +20,7 @@ dependencies:
   shared_preferences: ^2.5.3
   file_picker: 12.3.0
   just_audio_background: ^0.0.1-beta.17
+  flutter_launcher_icons: ^0.14.4
 
 dev_dependencies:
   flutter_test:
@@ -28,3 +29,11 @@ dev_dependencies:
 
 flutter:
   uses-material-design: true
+
+flutter_launcher_icons:
+  android: true
+  ios: false
+  image_path: "assets/icon/pinkbeat_icon.png"
+  min_sdk_android: 21
+  adaptive_icon_background: "#FCE4EC"
+  adaptive_icon_foreground: "assets/icon/pinkbeat_icon.png"

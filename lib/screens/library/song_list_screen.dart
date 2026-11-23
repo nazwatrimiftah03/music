@@ -1,5 +1,7 @@
+
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
+
 import '../../models/playlist.dart';
 import '../../models/song.dart';
 import '../../providers/player_provider.dart';
@@ -12,9 +14,9 @@ class SongListScreen extends StatefulWidget {
   final String title;
   final IconData icon;
   final Future<List<Song>> Function() loader;
-  final Playlist? playlist; // diisi kalau ini halaman playlist
-  final String? emptyText; // pesan kalau daftar kosong (opsional)
-  final bool allowSaveAsPlaylist; // tampilkan tombol "Simpan jadi playlist"
+  final Playlist? playlist;
+  final String? emptyText;
+  final bool allowSaveAsPlaylist;
 
   const SongListScreen({
     super.key,
@@ -32,13 +34,18 @@ class SongListScreen extends StatefulWidget {
 
 class _SongListScreenState extends State<SongListScreen> {
   late Future<List<Song>> _future;
+
   bool _saving = false;
   bool _saved = false;
+  bool _deleting = false;
+  bool _renaming = false;
+
   late String _title;
 
-  static const _months = [
-    'Jan', 'Feb', 'Mar', 'Apr', 'Mei', 'Jun',
-    'Jul', 'Agu', 'Sep', 'Okt', 'Nov', 'Des',
+  static const List<String> _months = [
+    'Jan', 'Feb', 'Mar', 'Apr',
+    'Mei', 'Jun', 'Jul', 'Agu',
+    'Sep', 'Okt', 'Nov', 'Des',
   ];
 
   @override
@@ -48,237 +55,590 @@ class _SongListScreenState extends State<SongListScreen> {
     _future = widget.loader();
   }
 
-  void _reload() {
+  Future<void> _reload() async {
+    if (!mounted) return;
+
+    final future = widget.loader();
+
     setState(() {
-      _future = widget.loader();
+      _future = future;
     });
+
+    try {
+      await future;
+    } catch (_) {
+      // Kesalahan ditampilkan melalui FutureBuilder.
+    }
   }
 
-  /// Simpan isi halaman ini sebagai playlist baru.
-  /// Lagu dimasukkan satu per satu supaya urutannya tetap sama.
+  void _showMessage(String message) {
+    if (!mounted) return;
+
+    ScaffoldMessenger.of(context)
+      ..hideCurrentSnackBar()
+      ..showSnackBar(
+        SnackBar(
+          content: Text(message),
+          behavior: SnackBarBehavior.floating,
+        ),
+      );
+  }
+
   Future<void> _saveAsPlaylist() async {
-    final messenger = ScaffoldMessenger.of(context);
+    if (_saving || _saved) return;
 
     List<Song> songs;
+
     try {
       songs = await _future;
     } catch (_) {
+      _showMessage('Gagal memuat lagu. Coba lagi.');
       return;
     }
+
+    if (!mounted) return;
 
     if (songs.isEmpty) {
-      messenger.showSnackBar(
-        const SnackBar(content: Text('Belum ada lagu untuk disimpan')),
-      );
+      _showMessage('Belum ada lagu untuk disimpan.');
       return;
     }
 
-    setState(() => _saving = true);
+    setState(() {
+      _saving = true;
+    });
+
     final now = DateTime.now();
     final name = '${widget.title} ${now.day} ${_months[now.month - 1]}';
 
     try {
-      final svc = LibraryService();
-      final created = await svc.createPlaylist(name);
+      final service = LibraryService();
+      final created = await service.createPlaylist(name);
+
       for (final song in songs) {
-        await svc.addToPlaylist(created.id, song);
+        await service.addToPlaylist(created.id, song);
       }
-      if (mounted) setState(() => _saved = true);
-      messenger.showSnackBar(
-        SnackBar(content: Text('Disimpan sebagai "$name"')),
-      );
+
+      if (!mounted) return;
+
+      setState(() {
+        _saved = true;
+      });
+
+      _showMessage('Berhasil disimpan sebagai "$name".');
     } catch (e) {
-      messenger.showSnackBar(
-        SnackBar(content: Text('Gagal menyimpan: $e')),
-      );
+      _showMessage('Gagal menyimpan playlist: $e');
     } finally {
-      if (mounted) setState(() => _saving = false);
+      if (mounted) {
+        setState(() {
+          _saving = false;
+        });
+      }
     }
   }
 
   Future<void> _renamePlaylist() async {
-    final messenger = ScaffoldMessenger.of(context);
-    final name = await promptPlaylistName(context, initial: _title);
-    if (name == null || name == _title) return;
+    if (_renaming || widget.playlist == null) return;
+
+    final name = await promptPlaylistName(
+      context,
+      initial: _title,
+    );
+
+    if (!mounted || name == null) return;
+
+    final cleanedName = name.trim();
+
+    if (cleanedName.isEmpty || cleanedName == _title) return;
+
+    setState(() {
+      _renaming = true;
+    });
 
     try {
-      await LibraryService().renamePlaylist(widget.playlist!.id, name);
-      if (mounted) setState(() => _title = name);
-      messenger.showSnackBar(
-        const SnackBar(content: Text('Nama playlist diubah')),
+      await LibraryService().renamePlaylist(
+        widget.playlist!.id,
+        cleanedName,
       );
+
+      if (!mounted) return;
+
+      setState(() {
+        _title = cleanedName;
+      });
+
+      _showMessage('Nama playlist berhasil diubah.');
     } catch (e) {
-      messenger.showSnackBar(SnackBar(content: Text('Gagal: $e')));
+      _showMessage('Gagal mengubah nama playlist: $e');
+    } finally {
+      if (mounted) {
+        setState(() {
+          _renaming = false;
+        });
+      }
     }
   }
 
   Future<void> _deletePlaylist() async {
-    final ok = await showDialog<bool>(
+    if (_deleting || widget.playlist == null) return;
+
+    final confirm = await showDialog<bool>(
       context: context,
-      builder: (ctx) => AlertDialog(
-        title: const Text('Hapus playlist?'),
-        content: Text('"$_title" akan dihapus permanen.'),
-        actions: [
-          TextButton(
+      builder: (ctx) {
+        final cs = Theme.of(ctx).colorScheme;
+
+        return AlertDialog(
+          icon: Icon(
+            Icons.delete_outline_rounded,
+            size: 36,
+            color: cs.error,
+          ),
+          title: const Text('Hapus Playlist?'),
+          content: Text(
+            'Playlist "$_title" akan dihapus. '
+                'Tindakan ini tidak dapat dibatalkan.',
+          ),
+          actions: [
+            TextButton(
               onPressed: () => Navigator.pop(ctx, false),
-              child: const Text('Batal')),
-          TextButton(
+              child: const Text('Batal'),
+            ),
+            FilledButton(
+              style: FilledButton.styleFrom(
+                backgroundColor: cs.error,
+                foregroundColor: cs.onError,
+              ),
               onPressed: () => Navigator.pop(ctx, true),
-              child: const Text('Hapus')),
-        ],
-      ),
+              child: const Text('Hapus'),
+            ),
+          ],
+        );
+      },
     );
-    if (ok != true) return;
-    await LibraryService().deletePlaylist(widget.playlist!.id);
-    if (mounted) Navigator.pop(context);
+
+    if (confirm != true || !mounted) return;
+
+    setState(() {
+      _deleting = true;
+    });
+
+    try {
+      await LibraryService().deletePlaylist(widget.playlist!.id);
+
+      if (!mounted) return;
+
+      Navigator.pop(context);
+    } catch (e) {
+      _showMessage('Gagal menghapus playlist: $e');
+    } finally {
+      if (mounted) {
+        setState(() {
+          _deleting = false;
+        });
+      }
+    }
+  }
+
+  void _playAll(List<Song> songs) {
+    if (songs.isEmpty) return;
+
+    context.read<PlayerProvider>().playQueue(songs, 0);
+  }
+
+  void _shuffleAll(List<Song> songs) {
+    if (songs.isEmpty) return;
+
+    final shuffled = List<Song>.of(songs)..shuffle();
+
+    context.read<PlayerProvider>().playQueue(shuffled, 0);
   }
 
   @override
   Widget build(BuildContext context) {
-    final cs = Theme.of(context).colorScheme;
-    final player = context.read<PlayerProvider>();
+    final theme = Theme.of(context);
+    final cs = theme.colorScheme;
 
     return Scaffold(
       appBar: AppBar(
+        title: Text(
+          _title,
+          maxLines: 1,
+          overflow: TextOverflow.ellipsis,
+          style: const TextStyle(
+            fontWeight: FontWeight.w800,
+          ),
+        ),
         actions: [
           if (widget.allowSaveAsPlaylist)
-            _saving
-                ? const Padding(
-              padding: EdgeInsets.all(14),
-              child: SizedBox(
-                width: 22,
-                height: 22,
-                child: CircularProgressIndicator(strokeWidth: 2.5),
-              ),
-            )
-                : IconButton(
-              tooltip: _saved ? 'Sudah disimpan' : 'Simpan jadi playlist',
-              icon: Icon(_saved
-                  ? Icons.check_rounded
-                  : Icons.playlist_add_rounded),
-              onPressed: _saved ? null : _saveAsPlaylist,
-            ),
+            _buildSaveButton(cs),
+
           if (widget.playlist != null) ...[
             IconButton(
               tooltip: 'Ganti nama',
-              icon: const Icon(Icons.edit_outlined),
-              onPressed: _renamePlaylist,
+              onPressed: _renaming ? null : _renamePlaylist,
+              icon: _renaming
+                  ? const SizedBox(
+                width: 20,
+                height: 20,
+                child: CircularProgressIndicator(
+                  strokeWidth: 2,
+                ),
+              )
+                  : const Icon(Icons.edit_outlined),
             ),
             IconButton(
               tooltip: 'Hapus playlist',
-              icon: const Icon(Icons.delete_outline_rounded),
-              onPressed: _deletePlaylist,
+              onPressed: _deleting ? null : _deletePlaylist,
+              icon: _deleting
+                  ? const SizedBox(
+                width: 20,
+                height: 20,
+                child: CircularProgressIndicator(
+                  strokeWidth: 2,
+                ),
+              )
+                  : const Icon(Icons.delete_outline_rounded),
             ),
           ],
         ],
       ),
-      bottomNavigationBar: const SafeArea(child: MiniPlayer()),
+      bottomNavigationBar: const SafeArea(
+        child: MiniPlayer(),
+      ),
       body: FutureBuilder<List<Song>>(
         future: _future,
-        builder: (context, snap) {
-          if (snap.connectionState != ConnectionState.done) {
-            return Center(child: CircularProgressIndicator(color: cs.primary));
+        builder: (context, snapshot) {
+          if (snapshot.connectionState != ConnectionState.done) {
+            return Center(
+              child: CircularProgressIndicator(
+                color: cs.primary,
+              ),
+            );
           }
-          if (snap.hasError) {
-            return Center(child: Text('Gagal memuat\n${snap.error}',
-                textAlign: TextAlign.center));
+
+          if (snapshot.hasError) {
+            return _buildError(cs);
           }
-          final songs = snap.data!;
-          return ListView(
-            children: [
-              const SizedBox(height: 8),
-              Center(
-                child: Container(
-                  width: 150,
-                  height: 150,
-                  decoration: BoxDecoration(
-                    borderRadius: BorderRadius.circular(24),
-                    gradient: LinearGradient(
-                      begin: Alignment.topLeft,
-                      end: Alignment.bottomRight,
-                      colors: [cs.primary, cs.secondary],
-                    ),
-                    boxShadow: [
-                      BoxShadow(
-                          color: cs.primary.withValues(alpha: 0.35),
-                          blurRadius: 28,
-                          offset: const Offset(0, 12)),
-                    ],
+
+          final songs = snapshot.data ?? <Song>[];
+
+          return RefreshIndicator(
+            color: cs.primary,
+            onRefresh: _reload,
+            child: ListView(
+              physics: const AlwaysScrollableScrollPhysics(),
+              padding: const EdgeInsets.only(bottom: 30),
+              children: [
+                _buildHeader(
+                  context,
+                  songs,
+                  cs,
+                  theme,
+                ),
+
+                const SizedBox(height: 22),
+
+                if (songs.isNotEmpty)
+                  _buildSongHeading(
+                    songs.length,
+                    cs,
+                    theme,
                   ),
-                  child: Icon(widget.icon, size: 64, color: Colors.white),
-                ),
-              ),
-              const SizedBox(height: 20),
-              Padding(
-                padding: const EdgeInsets.symmetric(horizontal: 20),
-                child: Text(_title,
-                    style: Theme.of(context)
-                        .textTheme
-                        .headlineSmall
-                        ?.copyWith(fontWeight: FontWeight.w800)),
-              ),
-              Padding(
-                padding: const EdgeInsets.fromLTRB(20, 4, 20, 16),
-                child: Text('${songs.length} lagu',
-                    style: TextStyle(color: cs.onSurfaceVariant)),
-              ),
-              if (songs.isNotEmpty)
-                Padding(
-                  padding: const EdgeInsets.symmetric(horizontal: 20),
-                  child: Row(
-                    children: [
-                      Expanded(
-                        child: FilledButton.icon(
-                          icon: const Icon(Icons.play_arrow_rounded),
-                          label: const Text('Putar'),
-                          onPressed: () => player.playQueue(songs, 0),
-                        ),
-                      ),
-                      const SizedBox(width: 12),
-                      Expanded(
-                        child: OutlinedButton.icon(
-                          style: OutlinedButton.styleFrom(
-                            minimumSize: const Size.fromHeight(52),
-                            shape: const StadiumBorder(),
-                            foregroundColor: cs.primary,
-                            side: BorderSide(color: cs.primary),
-                          ),
-                          icon: const Icon(Icons.shuffle_rounded),
-                          label: const Text('Acak'),
-                          onPressed: () {
-                            final shuffled = [...songs]..shuffle();
-                            player.playQueue(shuffled, 0);
-                          },
-                        ),
-                      ),
-                    ],
+
+                if (songs.isNotEmpty)
+                  ...List.generate(
+                    songs.length,
+                        (index) {
+                      return SongTile(
+                        song: songs[index],
+                        playlistId: widget.playlist?.id,
+                        onChanged: _reload,
+                        onTap: () {
+                          context.read<PlayerProvider>().playQueue(
+                            songs,
+                            index,
+                          );
+                        },
+                      );
+                    },
                   ),
-                ),
-              const SizedBox(height: 12),
-              if (songs.isEmpty)
-                Padding(
-                  padding: const EdgeInsets.all(40),
-                  child: Center(
-                    child: Text(
-                        widget.emptyText ??
-                            (widget.playlist != null
-                                ? 'Playlist masih kosong.\nTambah lagu lewat menu ⋯ di lagu mana saja 💗'
-                                : 'Belum ada lagu yang disukai.'),
-                        textAlign: TextAlign.center,
-                        style: TextStyle(color: cs.onSurfaceVariant)),
-                  ),
-                ),
-              for (var i = 0; i < songs.length; i++)
-                SongTile(
-                  song: songs[i],
-                  playlistId: widget.playlist?.id,
-                  onChanged: _reload,
-                  onTap: () => player.playQueue(songs, i),
-                ),
-              const SizedBox(height: 16),
-            ],
+
+                if (songs.isEmpty)
+                  _buildEmpty(cs, theme),
+
+                const SizedBox(height: 20),
+              ],
+            ),
           );
         },
+      ),
+    );
+  }
+
+  Widget _buildSaveButton(ColorScheme cs) {
+    if (_saving) {
+      return const Padding(
+        padding: EdgeInsets.all(14),
+        child: SizedBox(
+          width: 22,
+          height: 22,
+          child: CircularProgressIndicator(
+            strokeWidth: 2.5,
+          ),
+        ),
+      );
+    }
+
+    return IconButton(
+      tooltip: _saved
+          ? 'Sudah disimpan'
+          : 'Simpan jadi playlist',
+      onPressed: _saved ? null : _saveAsPlaylist,
+      icon: Icon(
+        _saved
+            ? Icons.check_circle_rounded
+            : Icons.playlist_add_rounded,
+        color: _saved ? cs.primary : null,
+      ),
+    );
+  }
+
+  Widget _buildHeader(
+      BuildContext context,
+      List<Song> songs,
+      ColorScheme cs,
+      ThemeData theme,
+      ) {
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.fromLTRB(22, 26, 22, 25),
+      decoration: BoxDecoration(
+        gradient: LinearGradient(
+          begin: Alignment.topLeft,
+          end: Alignment.bottomRight,
+          colors: [
+            cs.primary.withValues(alpha: 0.22),
+            cs.secondary.withValues(alpha: 0.12),
+            cs.surface,
+          ],
+        ),
+      ),
+      child: Column(
+        children: [
+          Container(
+            width: 174,
+            height: 174,
+            decoration: BoxDecoration(
+              borderRadius: BorderRadius.circular(30),
+              gradient: LinearGradient(
+                begin: Alignment.topLeft,
+                end: Alignment.bottomRight,
+                colors: [
+                  cs.primary,
+                  cs.secondary,
+                ],
+              ),
+              boxShadow: [
+                BoxShadow(
+                  color: cs.primary.withValues(alpha: 0.30),
+                  blurRadius: 28,
+                  offset: const Offset(0, 12),
+                ),
+              ],
+            ),
+            child: Icon(
+              widget.icon,
+              size: 76,
+              color: Colors.white,
+            ),
+          ),
+
+          const SizedBox(height: 22),
+
+          Text(
+            _title,
+            textAlign: TextAlign.center,
+            style: theme.textTheme.headlineSmall?.copyWith(
+              fontWeight: FontWeight.w900,
+              letterSpacing: -0.5,
+            ),
+          ),
+
+          const SizedBox(height: 8),
+
+          Text(
+            '${songs.length} lagu',
+            style: theme.textTheme.bodyMedium?.copyWith(
+              color: cs.onSurfaceVariant,
+            ),
+          ),
+
+          if (songs.isNotEmpty) ...[
+            const SizedBox(height: 22),
+
+            Row(
+              children: [
+                Expanded(
+                  child: FilledButton.icon(
+                    icon: const Icon(Icons.play_arrow_rounded),
+                    label: const Text('Putar Semua'),
+                    onPressed: () => _playAll(songs),
+                    style: FilledButton.styleFrom(
+                      minimumSize: const Size.fromHeight(52),
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(30),
+                      ),
+                    ),
+                  ),
+                ),
+
+                const SizedBox(width: 12),
+
+                Expanded(
+                  child: OutlinedButton.icon(
+                    icon: const Icon(Icons.shuffle_rounded),
+                    label: const Text('Acak'),
+                    onPressed: () => _shuffleAll(songs),
+                    style: OutlinedButton.styleFrom(
+                      minimumSize: const Size.fromHeight(52),
+                      foregroundColor: cs.primary,
+                      side: BorderSide(color: cs.primary),
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(30),
+                      ),
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ],
+        ],
+      ),
+    );
+  }
+
+  Widget _buildSongHeading(
+      int total,
+      ColorScheme cs,
+      ThemeData theme,
+      ) {
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(20, 4, 20, 12),
+      child: Row(
+        children: [
+          Container(
+            width: 4,
+            height: 24,
+            decoration: BoxDecoration(
+              color: cs.primary,
+              borderRadius: BorderRadius.circular(10),
+            ),
+          ),
+          const SizedBox(width: 10),
+          Expanded(
+            child: Text(
+              'Daftar Lagu',
+              style: theme.textTheme.titleLarge?.copyWith(
+                fontWeight: FontWeight.w900,
+              ),
+            ),
+          ),
+          Text(
+            '$total lagu',
+            style: theme.textTheme.bodySmall?.copyWith(
+              color: cs.onSurfaceVariant,
+              fontWeight: FontWeight.w600,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildEmpty(
+      ColorScheme cs,
+      ThemeData theme,
+      ) {
+    final message = widget.emptyText ??
+        (widget.playlist != null
+            ? 'Playlist masih kosong.\n'
+            'Tambahkan lagu melalui menu pada lagu.'
+            : 'Belum ada lagu yang disukai.');
+
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(30, 55, 30, 55),
+      child: Column(
+        children: [
+          Container(
+            width: 105,
+            height: 105,
+            decoration: BoxDecoration(
+              color: cs.primaryContainer.withValues(alpha: 0.65),
+              shape: BoxShape.circle,
+            ),
+            child: Icon(
+              widget.icon,
+              size: 48,
+              color: cs.primary,
+            ),
+          ),
+          const SizedBox(height: 20),
+          Text(
+            'Belum Ada Lagu',
+            style: theme.textTheme.titleLarge?.copyWith(
+              fontWeight: FontWeight.w900,
+            ),
+          ),
+          const SizedBox(height: 9),
+          Text(
+            message,
+            textAlign: TextAlign.center,
+            style: theme.textTheme.bodyMedium?.copyWith(
+              color: cs.onSurfaceVariant,
+              height: 1.5,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildError(ColorScheme cs) {
+    return Center(
+      child: Padding(
+        padding: const EdgeInsets.all(28),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(
+              Icons.cloud_off_rounded,
+              size: 58,
+              color: cs.onSurfaceVariant,
+            ),
+            const SizedBox(height: 16),
+            Text(
+              'Gagal Memuat Lagu',
+              style: TextStyle(
+                color: cs.onSurface,
+                fontSize: 18,
+                fontWeight: FontWeight.w800,
+              ),
+            ),
+            const SizedBox(height: 8),
+            Text(
+              'Periksa koneksi internet dan coba kembali.',
+              textAlign: TextAlign.center,
+              style: TextStyle(
+                color: cs.onSurfaceVariant,
+              ),
+            ),
+            const SizedBox(height: 18),
+            FilledButton.icon(
+              onPressed: _reload,
+              icon: const Icon(Icons.refresh_rounded),
+              label: const Text('Coba Lagi'),
+            ),
+          ],
+        ),
       ),
     );
   }
